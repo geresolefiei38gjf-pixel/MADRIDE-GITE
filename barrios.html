@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Madrid Atlas — границы 131 квартала</title><meta name="theme-color" content="#142b24"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:#18332b}body{background:#edf1ec}
+header{height:71px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;background:#142b24;color:#fff}
+header h1{font-size:19px;margin:0;letter-spacing:-.04em}header small{color:#bdd3c4;font-size:11px}
+header a{color:#fff;border:1px solid #4c6d5b;padding:9px;border-radius:12px;font-size:12px;text-decoration:none}
+#map{height:calc(100dvh - 191px);min-height:300px;width:100%;z-index:0}
+.controls{display:flex;align-items:center;gap:7px;padding:11px 11px 6px;overflow:auto;white-space:nowrap;background:#fff}
+button{border:1px solid #d9e4dc;padding:9px 13px;border-radius:14px;background:#f7f9f6;color:#264535;font-weight:700;font-size:13px;cursor:pointer}
+button.active{background:#174b37;color:white;border-color:#174b37}
+.searchrow{background:white;display:flex;gap:7px;padding:0 11px 10px}
+input{min-width:0;flex:1;font-size:14px;border:1px solid #d8e1da;background:#f6f8f6;padding:10px 13px;border-radius:12px}
+#find{color:white;background:#174b37}#locate{color:#fff;background:#a3333c}
+#status{position:absolute;z-index:500;left:12px;right:12px;bottom:23px;margin:auto;max-width:540px;background:rgba(20,43,36,.93);color:white;padding:10px 13px;border-radius:15px;box-shadow:0 5px 20px #162a2438;font-size:12px;pointer-events:none}
+#result{display:none;position:absolute;z-index:550;top:190px;left:12px;right:12px;max-width:510px;max-height:40vh;overflow:auto;background:white;border-radius:14px;box-shadow:0 7px 25px #1114}
+.item{padding:13px 14px;border-bottom:1px solid #e6ebe6;cursor:pointer;font-size:13px}
+.item b{display:block;font-size:15px}.item small{color:#63766a}
+.leaflet-container{font:inherit}.leaflet-popup-content{line-height:1.6}
+.legend{background:#fff;padding:8px 11px;border-radius:12px;box-shadow:0 2px 13px #0002;font-size:12px;max-width:195px}
+.legend span{display:block;margin:4px 0}
+.foot{position:absolute;bottom:0;left:0;right:0;background:#fff;color:#718276;font-size:10px;padding:5px 10px;z-index:600;text-align:center}
+@media(min-width:850px){#map{height:calc(100dvh - 191px)}header,.controls,.searchrow{padding-left:max(16px,calc((100vw - 1200px)/2));padding-right:max(16px,calc((100vw - 1200px)/2))}}
+</style></head>
+<body>
+<header><div><h1>MADRID · ATLAS <span style="color:#e3bb81">131</span></h1><small>Границы кварталов и 21 район · официальные геоданные</small></div><a href="./index.html">← Основной Atlas</a></header>
+<div class="controls">
+<button id="barrioBtn" class="active">131 квартал</button>
+<button id="districtBtn" class="active">21 район</button>
+<button id="redBtn">Красные границы</button>
+<button id="colorBtn" class="active">Цвета</button>
+<button id="centerBtn">Центр</button>
+</div>
+<div class="searchrow"><input id="search" placeholder="Найти квартал: Universidad, Sol, Goya…" autocomplete="off"/><button id="find">Найти</button><button id="locate">◎ Я здесь</button></div>
+<div id="map"></div><div id="result"></div><div id="status">Загружаю официальные границы 131 квартала Мадрида…</div>
+<div class="foot">Источник границ: Ayuntamiento de Madrid · Open Data · © OpenStreetMap</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map=L.map('map',{zoomControl:false,preferCanvas:true}).setView([40.4215,-3.704],12);
+L.control.zoom({position:'bottomright'}).addTo(map);
+const street=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
+const alt=L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OpenStreetMap · CARTO'});
+L.control.layers({'Улицы':street,'Светлая':alt},{},{position:'topright'}).addTo(map);
+const status=document.getElementById('status'),result=document.getElementById('result');
+const colors=['#8fb6a1','#e3bd9a','#bac5e8','#f1c6a5','#a6c8d1','#e1afbd','#c8d6a1','#d2bce2','#d0d0a3','#b4d7c8','#e8c1a9','#b1c0dc','#d7d6a1','#d9bcb0','#a6d2df','#d3bbda','#c3d6b2','#f0d1b4','#bfbdcf','#a5d6cc','#e5b0b5'];
+const state={red:false,color:true,barrio:true,district:true};let barrioLayer=null,districtLayer=null,barrios=[],districts=[],locationMarker=null;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const base='https://sigma.madrid.es/hosted/rest/services/CARTOGRAFIA/LIMITES_ADMINISTRATIVOS/MapServer/';
+const query=id=>base+id+'/query?'+new URLSearchParams({where:'1=1',outFields:'*',returnGeometry:'true',outSR:'4326',f:'geojson'}).toString();
+const color=p=>colors[((parseInt(p.COD_DIS_TX)||1)-1)%colors.length];
+function barrioStyle(f){return{color:state.red?'#d62839':'#b2444c',weight:state.red?2.5:1.25,opacity:.98,fillColor:state.color?color(f.properties):'#fdfdfd',fillOpacity:state.color?.22:0}}
+function districtStyle(f){return{color:'#153a32',weight:state.red?3.3:3,opacity:1,fillOpacity:0}}
+function label(f){return esc(f.properties.NOMBRE||f.properties.NOMDIS||'Район')}
+function pop(f){const p=f.properties;return '<b>'+esc(p.NOMBRE)+'</b><br>Район: '+esc(p.NOMDIS||'')+'<br><a href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent((p.NOMBRE||'')+', Madrid')+'" target="_blank" rel="noopener">Открыть в Google Maps ↗</a>'}
+function draw(){
+ if(barrioLayer)map.removeLayer(barrioLayer);if(districtLayer)map.removeLayer(districtLayer);
+ if(state.barrio&&barrios.length){barrioLayer=L.geoJSON({type:'FeatureCollection',features:barrios},{style:barrioStyle,onEachFeature:(f,l)=>{l.bindPopup(pop(f));l.bindTooltip(label(f),{sticky:true,direction:'top'});l.on('mouseover',()=>l.setStyle({weight:3,fillOpacity:.38}));l.on('mouseout',()=>barrioLayer.resetStyle(l));}}).addTo(map)}
+ if(state.district&&districts.length){districtLayer=L.geoJSON({type:'FeatureCollection',features:districts},{style:districtStyle,interactive:false}).addTo(map)}
+ for(const [id,on]of [['barrioBtn',state.barrio],['districtBtn',state.district],['redBtn',state.red],['colorBtn',state.color]])document.getElementById(id).classList.toggle('active',on)
+}
+async function getLayer(id){const r=await fetch(query(id),{mode:'cors'});if(!r.ok)throw new Error('Сервис вернул '+r.status);const d=await r.json();if(!d.features||!d.features.length)throw Error('Нет геометрий');return d.features.filter(f=>f.geometry)}
+async function load(){
+ try{barrios=await getLayer(25);districts=await getLayer(3);draw();status.innerHTML='Загружено: <b>'+barrios.length+' кварталов</b> и <b>'+districts.length+' районов</b>. Коснись любого квартала или найди название.';setTimeout(()=>status.style.display='none',8000)}
+ catch(e){status.innerHTML='Не удалось загрузить границы с геопортала: '+esc(e.message)+'. <a style="color:#fff" href="#" onclick="location.reload();return false">Повторить</a>. Попробуй Safari с доступом к сети.';console.error(e)}
+}
+load();
+[['barrioBtn','barrio'],['districtBtn','district'],['redBtn','red'],['colorBtn','color']].forEach(([id,k])=>document.getElementById(id).onclick=()=>{state[k]=!state[k];draw()});
+document.getElementById('centerBtn').onclick=()=>map.setView([40.4205,-3.703],14);
+function focus(f){const layer=L.geoJSON(f);map.fitBounds(layer.getBounds(),{padding:[38,38],maxZoom:15});result.style.display='none';L.popup().setLatLng(layer.getBounds().getCenter()).setContent(pop(f)).openOn(map)}
+function search(){const q=document.getElementById('search').value.trim().toLocaleLowerCase('es');if(!q||!barrios.length)return;const found=barrios.filter(f=>(f.properties.NOMBRE+' '+f.properties.NOMDIS).toLocaleLowerCase('es').includes(q)).slice(0,25);if(!found.length){result.innerHTML='<div class="item">Ничего не найдено</div>'}else{result.innerHTML=found.map((f,i)=>'<div class="item" data-index="'+i+'"><b>'+esc(f.properties.NOMBRE)+'</b><small>'+esc(f.properties.NOMDIS)+'</small></div>').join('');result.querySelectorAll('.item').forEach(el=>el.onclick=()=>focus(found[Number(el.dataset.index)]))}result.style.display='block'}
+document.getElementById('find').onclick=search;document.getElementById('search').addEventListener('keydown',e=>{if(e.key==='Enter')search()});
+document.getElementById('locate').onclick=()=>{if(!navigator.geolocation){alert('Геолокация недоступна');return}status.style.display='block';status.textContent='Определяю положение…';navigator.geolocation.getCurrentPosition(pos=>{const ll=[pos.coords.latitude,pos.coords.longitude];if(locationMarker)map.removeLayer(locationMarker);locationMarker=L.circleMarker(ll,{radius:9,color:'white',weight:3,fillColor:'#2376fc',fillOpacity:1}).addTo(map).bindPopup('Твоё текущее местоположение');map.setView(ll,15);status.style.display='none'},err=>{status.textContent='Геопозиция недоступна: разреши доступ к местоположению в Safari.';}, {enableHighAccuracy:true,timeout:15000,maximumAge:20000})};
+</script></body></html>
